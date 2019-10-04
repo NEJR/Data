@@ -1,5 +1,5 @@
 # Data
-#### This repository should include
+#### This repository should include...
 
 Characterize data
 
