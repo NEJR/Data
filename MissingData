@@ -1,0 +1,16 @@
+### Analyzing missing data
+Number of samples per vital sign to analyze missing data.
+
+```{r}
+distribution<-as.data.frame(colSums(!is.na(df_vitals_eicu)))
+distribution<-rename(distribution, 'complete'='colSums(!is.na(df_vitals_eicu))')
+distribution['missing']<-colSums(is.na(df_vitals_eicu))
+
+missingplot <- plot_ly(distribution, x = row.names(distribution), y = ~complete, type = 'bar', name = 'Complete values', marker=list(color='#2980b9')) %>%
+  add_trace(y = ~missing, name = 'Missing Values', marker=list(color='#2c3e50')) %>%
+  layout(title = 'No. of measurements per variable for a patient in the first 24h of ICU admission'
+         , barmode = 'stack'
+         , yaxis =list(title='measurements'))
+
+missingplot
+```
