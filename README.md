@@ -20,3 +20,6 @@ Rank Data
 Transform Data
 
 Combine Tables
+
+### Option:
+Categorise continuous/numerical variables
