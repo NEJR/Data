@@ -1,0 +1,22 @@
+### Creating Categorical Variables from Continuous/Numeric Variables
+Sometimes numeric variables need to be broken down into categorical variables or factors. 
+This can be done for a variety of reasons. 
+There is a useful function called cut2 in the Hmisc package. We install it and use it below.
+```{r}
+if(!("Hmisc" %in% installed.packages()[,1])) {
+ install.packages("Hmisc",repos="https://cloud.r-project.org")
+ }
+library(Hmisc)
+```
+
+brake down into 5 groups
+```{r}
+dat2$age.cat <- cut2(dat2$age,g=5)
+table(dat2$age.cat)
+```
+
+at defined points
+```{r}
+dat2$age.cat2 <- cut2(dat2$age,c(25,40,55,70,85))
+table(dat2$age.cat2)
+```
