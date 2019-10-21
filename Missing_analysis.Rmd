@@ -1,0 +1,141 @@
+---
+title: "Missing_value"
+author: "Takahiro"
+date: "2019/10/20"
+output: html_document
+---
+
+# Missing valuesがあるデータを扱います。
+使用するデータセットはアメリカのGeneral Social Survey (GSS)のデータです。  
+(dataはSourceDataに投入しました)
+簡単に各項目の説明を書いておきます。
+<ul>
+<li>**id:** respondant's unique ID</li>
+<li>**health:** self-reported health level with 4 categories: poor, fair, good, excellent</li>
+<li>**partyid:** political party affiliation with categories dem, rep, or other</li>
+<li>**age:** age in years</li>
+<li>**sex:** male or female</li>
+<li>**sexornt:** sexual orientation with categories hetero, gay, or bisexual/other</li>
+<li>**educ:** number of years of formal education (capped at 20 years)</li>
+<li>**marital:** marital status with categories married, never married, and no longer married</li>
+<li>**race:** with categories black, white, and other</li>
+<li>**income:** in thousands of dollars</li>
+</ul>
+
+```{r}
+library(tidyverse)
+gsshealth <- read.csv("C:/Users/ogmcd/Dropbox/00_2019_Class/Fall/CS109A/Labnotes/data/gsshealth18.csv", header=TRUE)
+str(gsshealth)
+head(gsshealth)
+```
+
+health, partyid, sex, sexornt, marital, raceはfactorになっており扱いやすそうです。  
+次はsummary commandでもう少し細かくデータの中身を調べます。
+```{r}
+gsshealth %>% summary
+```
+
+idのMaxからわかる通り、連番になっていないことが少し気にかかりますが、まあ修正せずに行きましょう。
+age, education, marital statusにそれぞれ2名ずつ、incomeには661名のNAがあることがわかります。  
+incomeは一旦置いておいて、他の3つの変数で、missing valuesがどこにあるかどうかを調べます。
+
+```{r}
+which (is.na(gsshealth$age))
+which (is.na(gsshealth$educ))
+which (is.na(gsshealth$marital))
+```
+
+### なお、skimrというパッケージが欠損データの確認に便利です。
+```{r}
+library('skimr')
+gsshealth %>% skimr::skim()
+```
+
+
+
+Original datasetをいじると後から大変なので、一旦copyしておきます。
+
+```{r}
+gsscopy <- data.frame(gsshealth)
+```
+
+maritalとeducが欠損している人の年齢を見てみます。
+
+```{r}
+print(gsscopy$age[is.na(gsscopy$marital)])
+print(gsscopy$age[is.na(gsscopy$educ)])
+```
+
+まずmaritalについては、結婚していておかしくない年齢なので、marriedを入れましょう。  
+educについても、学生ではないことが確認できたので、13年を代入しておきます。  
+educの13年はアメリカで言うところの高卒です。  
+ageには中央値を入れることに決めました。  
+全て恣意的な作業なので、もちろん正当性が担保されているわけではありません。
+
+```{r}
+gsscopy$marital[is.na(gsscopy$marital)] <- 'married'
+gsscopy$educ[is.na(gsscopy$educ)] <- 13
+gsscopy$educ <- as.integer(gsscopy$educ)
+gsscopy$age[is.na(gsscopy$age)] <- median(gsscopy$age, na.rm = TRUE)
+str(gsscopy)
+gsscopy %>% summary
+```
+
+ここで一度incomeのhistogramを見てみます。
+
+```{r}
+gsscopy <-
+  mutate(gsscopy, income_median = if_else(is.na(gsscopy$income), true = median(gsscopy$income, na.rm = TRUE), false = gsscopy$income))
+income_two_values <- c(gsscopy$income, gsscopy$income_median)
+income_missing <- rep('missing', times = length(gsscopy$id))
+income_non_missing <- rep('non_missing', times = length(gsscopy$id))
+income_two_type <- c(income_missing, income_non_missing)
+income_df <- data.frame(missing_status = income_two_type, values = income_two_values)
+hist_inc <- ggplot(data = income_df, 
+                   mapping = aes(x = values, fill = missing_status))
+hist_inc + geom_histogram(position = "identity", binwidth = 10, alpha = 0.5)
+```
+
+極めて当たり前のことですが、medianの部分にすごく高いspikeができてしまい、かなり不自然な分布です。  
+もう少しいい補完方法を考えたいところです。  
+そこで、gsscopyのincomeのmissing valuesをその他の変数から予測することにしましょう。  
+まず、一旦missingを除外して、目的変数をincome, 説明変数をその他の変数としたLinear Regressionを作ります。  
+その次に、missingのみのdatasetにLinear Regressionをあてはめ、missingの値を予測します。
+
+```{r}
+gsscopy2 <-
+  na.omit(gsscopy)
+gsscopy2 %>% head
+```
+
+ちなみに、Rは回帰分析の際に自動でmissing valueをomitするので、↑の工程はあってもなくても変わりません。  
+さて、回帰分析でmissingを予測します。
+なお、"add_predictions"というfunctionを使うために、modelrというlibraryが必要です。
+
+```{r}
+library(modelr)
+model_income <- lm(income ~ health + partyid + age + sex + sexornt + educ + marital + race, data = gsscopy2)
+gsscopy_imputed <- 
+  gsscopy %>% 
+    add_predictions(model = model_income, var = "income_pred") %>% 
+    mutate(income_imputed=if_else(condition = is.na(income),
+                                  true = income_pred,
+                                  false = income %>% as.double())) %>% 
+  select(-income_pred)
+gsscopy$income %>% summary
+gsscopy_imputed$income_imputed %>% summary
+```
+
+Linear Modelを使って代入したので、負の値が出てきてしまいました。
+また、このモデルではuncertaintyを考慮していないので不自然なdatasetになります。
+uncertaintyとは、
+$$
+Y = \beta_0 + \beta_1X_1 + \cdots + \beta_nX_n + \epsilon
+$$
+における
+$$
+\epsilon
+$$
+とのことです。  
+ここを改善し何回も代入して多数のdatasetを作り、それぞれで解析して結果を統合するのがmultiple imputationです。  
+今回はちょっと疲れたのでここまで。
