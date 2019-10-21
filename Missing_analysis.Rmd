@@ -51,6 +51,12 @@ library('skimr')
 gsshealth %>% skimr::skim()
 ```
 
+binary outcomeとして、healthをpoorとそれ以外に分類します。
+```{r}
+gsshealth <-
+  mutate(gsshealth, poorhealth = if_else(health=='poor', true = 1, false = 0))
+```
+
 
 
 Original datasetをいじると後から大変なので、一旦copyしておきます。
@@ -81,19 +87,24 @@ str(gsscopy)
 gsscopy %>% summary
 ```
 
-ここで一度incomeのhistogramを見てみます。
+問題のincomeですが、試しにmedianを入れてみます。
 
 ```{r}
 gsscopy <-
   mutate(gsscopy, income_median = if_else(is.na(gsscopy$income), true = median(gsscopy$income, na.rm = TRUE), false = gsscopy$income))
-income_two_values <- c(gsscopy$income, gsscopy$income_median)
-income_missing <- rep('missing', times = length(gsscopy$id))
-income_non_missing <- rep('non_missing', times = length(gsscopy$id))
-income_two_type <- c(income_missing, income_non_missing)
-income_df <- data.frame(missing_status = income_two_type, values = income_two_values)
-hist_inc <- ggplot(data = income_df, 
-                   mapping = aes(x = values, fill = missing_status))
-hist_inc + geom_histogram(position = "identity", binwidth = 10, alpha = 0.5)
+gsscopy %>% summary
+```
+
+さて、ここでincomeのヒストグラムを見てみましょう。  
+medianで補完したものと補完していないものを比べてみます。
+
+```{r}
+hist_inc <- ggplot(data = gsscopy, 
+                   mapping = aes(x = income))
+hist_inc + geom_histogram(binwidth = 10, alpha = 0.5, fill = 'lightblue') + ylim(0, 1000)
+hist_inc_median <- ggplot(data = gsscopy, 
+                   mapping = aes(x = income_median))
+hist_inc_median + geom_histogram(binwidth = 10, alpha = 0.5, fill = 'darkblue') + ylim(0,1000)
 ```
 
 極めて当たり前のことですが、medianの部分にすごく高いspikeができてしまい、かなり不自然な分布です。  
@@ -127,6 +138,15 @@ gsscopy_imputed$income_imputed %>% summary
 ```
 
 Linear Modelを使って代入したので、負の値が出てきてしまいました。
+とりあえず一旦これを気にせずにLogistic regressionをしてみたいと思います。
+
+```{r}
+library(jtools)
+Log_model_single_imp <- glm(poorhealth ~ partyid + age + sex + sexornt + educ + marital + race + income, family = binomial(link = 'logit'), data = gsscopy_imputed)
+summ(Log_model_single_imp, exp = TRUE, confint = TRUE, digits = 3)
+```
+
+
 また、このモデルではuncertaintyを考慮していないので不自然なdatasetになります。
 uncertaintyとは、
 $$
@@ -136,6 +156,39 @@ $$
 $$
 \epsilon
 $$
-とのことです。  
+のことです。  
 ここを改善し何回も代入して多数のdatasetを作り、それぞれで解析して結果を統合するのがmultiple imputationです。  
-今回はちょっと疲れたのでここまで。
+では実際にやってみます。  
+使用するのは、miceというlibraryになります。
+
+```{r}
+gss_mi <- data.frame(gsshealth)
+library(mice)
+imp <- mice(gss_mi,
+            m = 10,
+            maxit = 50,
+            method = "pmm",
+            printFlag = FALSE)
+
+summary(imp)
+```
+
+imputationが終わったincomeの分布を確認できます。  
+青色が欠損データ、赤色がimputationデータです。
+
+```{r}
+densityplot(imp)
+```
+
+magrittrというlibraryを用いて、imputation dataでのlogistic regressionの結果を統合します。
+
+```{r}
+library(magrittr)
+combine <- imp %>%
+  with(glm(poorhealth ~ partyid + age + sex + sexornt + educ + marital + race + income, family = binomial(link = 'logit')))
+#round(summary(pool(combine)), 3)
+round(summary(pool(combine), conf.int = TRUE, exponentiate = TRUE), 3)
+```
+
+最後に統合したAUROCを求めようとしましたが、上手く行きませんでした。  
+誰か助けていただけると。
